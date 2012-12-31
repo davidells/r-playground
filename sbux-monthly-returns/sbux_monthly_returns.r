@@ -1,3 +1,6 @@
+# Most of the code here came from Eric Zivot's code in 
+# the coursera "Computational Finance" course
+
 # Read in a csv of two columns, date and price. But, while reading in, 
 # set the row labels to the dates, and import as a one column data frame
 # (one column of "Adj.Close") and row-labeled not by number, but by "Date".
@@ -52,7 +55,7 @@ legend(x="bottomright", legend=c("Simple", "CC"),
 
 # Calculate growth of $1 (by tracking the cumulative product of gross returns)...
 # Remember, gross returns are 1 + simple (i.e. simple of 0.06 -> gross of 1.06)
-sbux.fv = cumprod(1 + sbux.ret)
+sbux.fv <- cumprod(1 + sbux.ret)
 
 plot(sbux.fv, type="l", col="blue", lwd=2, ylab="Dollars", 
      main="FV of $1 invested in SBUX")
