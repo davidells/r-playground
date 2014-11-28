@@ -38,6 +38,7 @@ quotes <- function(ticker) {
 SPY.df <- quotes('SPY')
 XLE.df <- quotes('XLE')
 
+# Collect continously compounded returns for these
 SPYXLE.df <- merge(SPY.df$AdjClose, XLE.df$AdjClose)
 SPYXLE.ret.df <- diff(log(SPYXLE.df))
 colnames(SPYXLE.ret.df) <- c("SPY", "XLE");
@@ -166,7 +167,8 @@ ALL.ret.pca.lm <- lm(XLE ~ F[,c(1,2)], data = ALL.ret.df)
 
 # Still a pretty good fit for this data. Neat.
 # One last thing, let's check our results against a PCR.
-# See http://en.wikipedia.org/wiki/Principal_component_regression and http://machinelearningmastery.com/linear-regression-in-r/
+# See http://en.wikipedia.org/wiki/Principal_component_regression 
+# and http://machinelearningmastery.com/linear-regression-in-r/
 ALL.ret.pcr <- pcr(XLE~., data=ALL.ret.df, validation="CV")
 summary(ALL.ret.pcr)
 
