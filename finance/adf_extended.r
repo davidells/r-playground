@@ -20,6 +20,7 @@ adf <- function (
   DNAME <- deparse(substitute(x))
   
   k <- k + 1
+  x <- as.vector(x, mode="double")
   y <- diff(x)
   n <- length(y)
   z <- embed(y, k)
@@ -44,9 +45,8 @@ adf <- function (
     else if (model == 3)
       res <- lm(yt ~ 1 + xt1 + tt)
   }
-
+  
   res.sum <- summary(res)
-
   STAT <- res.sum$coefficients[2, 1]/res.sum$coefficients[2, 2]
   
   if (model == 1)
