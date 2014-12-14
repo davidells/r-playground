@@ -15,7 +15,7 @@ HurstExponent <- function(series) {
   upperBound <- floor(log2(len)) - 1
   divisions <- 0:upperBound
   hurstVals <- matrix(0, length(divisions), 2)
-  debug <- matrix(0, length(divisions), 4)
+  #debug <- matrix(0, length(divisions), 4)
   for (i in divisions) {
     n <- floor(len / 2^i)
     rangeSeries <- rollapply(series, width=n, FUN="RescaledRange", by=n)

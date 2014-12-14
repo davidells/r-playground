@@ -118,3 +118,21 @@ adf <- function (
       critvals = table, fit = res, data.name = DNAME), 
     class = "htest")
 }
+
+# Cointegrating Augmented Dickey Fuller test. Takes
+# two series, and runs the adf test on the two spreads between
+# them using hedge ratios from linear regressions using each
+# as the independent variable
+cadf <- function(x, y, ...) {
+  lmX <- lm(x ~ y)
+  lmY <- lm(y ~ x)
+  adfX <- adf(x - coef(lmX)[2]*y, ...)
+  adfY <- adf(y - coef(lmY)[2]*x, ...)
+  if (adfX$statistic < adfY$statistic) {
+    adfX$data.model <- lmX
+    adfX
+  } else {
+    adfY$data.model <- lmY
+    adfY
+  }
+}
