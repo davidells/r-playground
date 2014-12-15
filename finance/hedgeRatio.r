@@ -1,5 +1,5 @@
 # Adapted from http://quanttrader.info/public/betterHedgeRatios.pdf
-hedgeRatio <- function(x, y, method=c("ols", "tls")) {
+hedgeRatio <- function (x, y, method=c("ols", "tls")) {
   method <- match.arg(method)
   if (method == "ols") {
     coef(lm(x ~ y))[2]

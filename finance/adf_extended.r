@@ -5,7 +5,7 @@
 #
 adf <- function (
   x, alternative = c("stationary", "explosive"), 
-  model = 1, k = trunc((length(x) - 1)^(1/3))) {
+  model = 3, k = trunc((length(x) - 1)^(1/3))) {
   
   if (NCOL(x) > 1) 
     stop("x is not a vector or univariate time series")
@@ -117,22 +117,4 @@ adf <- function (
       p.value = PVAL, method = METHOD, 
       critvals = table, fit = res, data.name = DNAME), 
     class = "htest")
-}
-
-# Cointegrating Augmented Dickey Fuller test. Takes
-# two series, and runs the adf test on the two spreads between
-# them using hedge ratios from linear regressions using each
-# as the independent variable
-cadf <- function(x, y, ...) {
-  lmX <- lm(x ~ y)
-  lmY <- lm(y ~ x)
-  adfX <- adf(x - coef(lmX)[2]*y, ...)
-  adfY <- adf(y - coef(lmY)[2]*x, ...)
-  if (adfX$statistic < adfY$statistic) {
-    adfX$data.model <- lmX
-    adfX
-  } else {
-    adfY$data.model <- lmY
-    adfY
-  }
 }

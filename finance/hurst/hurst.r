@@ -1,6 +1,5 @@
 # RescaledRange adapted from HurstK in FGN package
-RescaledRange <- function (z) 
-{
+RescaledRange <- function (z) {
   y <- z - mean(z)
   S <- cumsum(y)
   R <- (max(S) - min(S))/sqrt(sum(y^2)/length(y))
@@ -10,7 +9,7 @@ RescaledRange <- function (z)
 # Implemented based on method discussed at
 # http://www.bearcave.com/misl/misl_tech/wavelets/hurst/index.html
 # Uncomment debug lines and run against brown72.h
-HurstExponent <- function(series) {
+HurstExponent <- function (series) {
   len <- length(series)
   upperBound <- floor(log2(len)) - 1
   divisions <- 0:upperBound
