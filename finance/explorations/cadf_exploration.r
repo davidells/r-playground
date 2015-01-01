@@ -1,50 +1,8 @@
 # Example of testing two price series for cointegration, as well as for
 # mean reversion in a spread between them. 
 
-# The hedge ratio used in cadf is determined by default by fitting a linear model using lm.
-# We'll also use an alternative regression using tls (instead of ols from lm) and test out
-# the pair that way.
-
-
-# Run cadf using ols and tls regression method, and using the ADF model II 
-# (assumes an intercept constant, but does not assume a drift constant, 
-# and with lag order of 1. Return best (lowest) p value found. Anything
-# below 0.10 indicates 90% certainty of mean reversion, 0.05 indicates 95%, etc.
-cadf.best <- function (x, y) {
-  debug <- FALSE
-  
-  # OLS can create two different hedge ratios based on which series
-  # is considered independent vs dependent.
-  cadf.ols <- cadf(x, y, method="ols", model=2, k=1)
-  
-  # TLS is symmetric, so order of series doesn't matter. See
-  # http://quanttrader.info/public/betterHedgeRatios.pdf
-  cadf.tls <- cadf(x, y, method="tls", model=2, k=1)
-  
-  # Capture smallest p-value among our tests
-  pValueMin <- min(
-      cadf.ols$p.value, 
-      cadf.tls$p.value)
-  
-  if (pValueMin == cadf.ols$p.value) {
-    cadf <- cadf.ols
-  } else {
-    cadf <- cadf.tls
-  }
-  return(cadf)
-}
-
-# Plot series, adding lines indicating one and two standard deviations away
-plotWithStdDev <- function (series) {
-  mean <- mean(series)
-  sd <- sd(series)
-  plot(series)
-  abline(h=mean, col="green")
-  abline(h=mean + sd, col="orange")
-  abline(h=mean - sd, col="orange")
-  abline(h=mean + sd*2, col="red")
-  abline(h=mean - sd*2, col="red")
-}
+library(tseries)
+library(quantmod)
 
 # First up, let's grab some data. For now, let's just guess at some cointegrating price series.
 # How about, the energy sector ETF, and a proxy for the price of oil, USO. We'll do 2008 through 2014.
@@ -63,10 +21,31 @@ print(cadf.best(Ad(XLE), Ad(USO)))
 
 # Indeed, a p-value of 0.04 is much better. Let's see this spread, with standard deviations.
 sprd <- Ad(USO) - hedgeRatio(Ad(USO), Ad(XLE), method="ols") * Ad(XLE)
+dimnames(sprd)[2] <- "USO.XLE.Spread"
 plotWithStdDev(sprd)
 
 # Finally, let's see what the half life of a reversion strategy might be with this spread...
 print(halflife(sprd))
+
+# Ah, but we've been tricked. It turns out that the spread we've created is actually
+# pretty much the same as just owning USO. Surprisingly, the price of oil over this time
+# period is mean reverting all on it's own. Though that's still the point if you're looking
+# to trade mean reversion, we need to be aware of this fact.
+
+# We have to systematically avoid this problem. What we're really doing here is attempting
+# to remove the variance of (for instance) USO using (for instance) XLE, and hoping that
+# the variance left unexplained is stationary, something predictable and tradeable
+# (i.e. white noise). So, for these sorts of spreads, we need a good hedge, one that is
+# correlated strongly with the hedged instrument. We need a high correlation value
+# between them.
+
+if (cor(Ad(USO), Ad(XLE))[1] < 0.90) {
+  print("Ack, USO and XLE aren't highly correlated!")
+}
+
+# When working with multiple factors, we just want to use the R-squared from a least squares
+# regression to decide how much variance has been explained, and require that to be high.
+
 
 # Let's try the example from Ernie Chan's book, of EWA vs EWC (note we can't get 2006 data
 # from default getSymbols provider yahoo, so ours starts at 2007)
