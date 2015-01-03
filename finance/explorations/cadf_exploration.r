@@ -32,15 +32,13 @@ print(halflife(sprd))
 # period is mean reverting all on it's own. Though that's still the point if you're looking
 # to trade mean reversion, we need to be aware of this fact.
 
-# We have to systematically avoid this problem. What we're really doing here is attempting
-# to remove the variance of (for instance) USO using (for instance) XLE, and hoping that
-# the variance left unexplained is stationary, something predictable and tradeable
-# (i.e. white noise). So, for these sorts of spreads, we need a good hedge, one that is
-# correlated strongly with the hedged instrument. We need a high correlation value
-# between them.
+# We have to systematically avoid this problem. One general way to do this is ensure
+# that the resulting portfolio is not correlated too strong with any one instrument.
 
-if (cor(Ad(USO), Ad(XLE))[1] < 0.90) {
-  print("Ack, USO and XLE aren't highly correlated!")
+maxCorrelation <- max(cor(data.frame(sprd, Ad(USO), Ad(XLE)))[1,2:3])
+if (maxCorrelation > 0.60) {
+  print("Spread is correlated to an underlying")
+  cor(data.frame(sprd, Ad(USO), Ad(XLE)))[1,]
 }
 
 # When working with multiple factors, we just want to use the R-squared from a least squares
