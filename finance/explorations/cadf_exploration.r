@@ -34,15 +34,10 @@ print(halflife(sprd))
 
 # We have to systematically avoid this problem. One general way to do this is ensure
 # that the resulting portfolio is not correlated too strong with any one instrument.
-maxCorrelation <- max(cor(data.frame(sprd, Ad(USO), Ad(XLE)))[1,2:3])
-if (maxCorrelation > 0.60) {
+if (correlatedWithConstituent( sprd, data.frame(Ad(USO), Ad(XLE)) )) {
   print("Spread is correlated to an underlying")
   cor(data.frame(sprd, Ad(USO), Ad(XLE)))[1,]
 }
-
-# Alternatively, we could just use the R-squared from a least squares
-# regression to decide how much variance has been explained, and require that to be high.
-
 
 # Let's try the example from Ernie Chan's book, of EWA vs EWC (note we can't get 2006 data
 # from default getSymbols provider yahoo, so ours starts at 2007)
