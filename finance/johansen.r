@@ -1,6 +1,5 @@
 library('urca')
 
-
 johansen <- function (x, ecdet="const", ...) {
   
   p <- 0
@@ -11,7 +10,6 @@ johansen <- function (x, ecdet="const", ...) {
   } else if (ecdet == c("const", "trend")) {
     p <- 1
   }
-  
   
   result = list()
   for (type in c("trace", "eigen")) {
@@ -38,8 +36,10 @@ johansen <- function (x, ecdet="const", ...) {
       result <- c(result, list("trace"=cvals))
     }
   }
-  result <- c(result, list("eig"=jo@lambda, "evec"=jo@V))
-  result
+  result <- c(result, list("eig"=jo@lambda, "evec"=jo@Vorg, "evecNorm"=jo@V))
+  
+  bestEvecNorm <- result$evecNorm[1:dim(result$evecNorm)[1]-1,1]
+  result <- c(result, list("bestWeights"=bestEvecNorm))
 }
 
 

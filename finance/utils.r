@@ -18,3 +18,27 @@ scatterPlotWithBestFit <- function(x, y, ...) {
   model <- lm(y ~ x + 1)
   abline(a=coef(m)[1], b=coef(m)[2], col="red")
 }
+
+# Given a set of price series in dataframe df, and a set of weights for each
+# instrument given in weights, return portfolio consisting of the weighted price
+# series
+portfolio <- function (df, weights) {
+  as.xts(as.matrix(df) %*% weights)
+}
+
+movingAvg <- function (x, n) {
+  rollapply(data = x, width = n, FUN = mean, na.rm = T, fill = NA)
+}
+
+movingStd <- function (x, n) {
+  rollapply(data = x, width = n, FUN = sd, na.rm = T, fill = NA)
+}
+
+# rep.row and rep.col from 
+# http://www.r-bloggers.com/a-quick-way-to-do-row-repeat-and-col-repeat-rep-row-rep-col/
+rep.row<-function(x,n){
+  matrix(rep(x,each=n),nrow=n)
+}
+rep.col<-function(x,n){
+  matrix(rep(x,each=n), ncol=n, byrow=TRUE)
+}

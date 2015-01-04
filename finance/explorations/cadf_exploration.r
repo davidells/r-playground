@@ -34,14 +34,13 @@ print(halflife(sprd))
 
 # We have to systematically avoid this problem. One general way to do this is ensure
 # that the resulting portfolio is not correlated too strong with any one instrument.
-
 maxCorrelation <- max(cor(data.frame(sprd, Ad(USO), Ad(XLE)))[1,2:3])
 if (maxCorrelation > 0.60) {
   print("Spread is correlated to an underlying")
   cor(data.frame(sprd, Ad(USO), Ad(XLE)))[1,]
 }
 
-# When working with multiple factors, we just want to use the R-squared from a least squares
+# Alternatively, we could just use the R-squared from a least squares
 # regression to decide how much variance has been explained, and require that to be high.
 
 

@@ -4,5 +4,5 @@ halflife <- function (y) {
   yDelta <- diff(y)[2:length(y)]
   y <- y[2:length(y)]
   lm <- lm(yDelta ~ y)
-  -log(2) / lm$coefficients[2]
+  -(-log(2) / lm$coefficients[2])
 }
