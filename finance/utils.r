@@ -36,11 +36,11 @@ movingStd <- function (x, n) {
 
 maxCorrelation <- function (portfolio, securities) {
   cols <- dim(securities)[2] + 1
-  max(cor(data.frame(portfolio, securities))[1,2:cols])
+  max(cor(data.frame(portfolio, securities), use = "na.or.complete")[1,2:cols])
 }
 
 correlatedWithConstituent <- function (portfolio, securities) {
-  abs(maxCorrelation(sprd, data.frame(Ad(USO), Ad(XLE)))) > 0.60
+  abs(maxCorrelation(portfolio, securities)) > 0.60
 }
 # rep.row and rep.col from 
 # http://www.r-bloggers.com/a-quick-way-to-do-row-repeat-and-col-repeat-rep-row-rep-col/
