@@ -4,12 +4,12 @@ plotWithStdDev <- function (series, ...) {
   sd <- sd(series)
   plot(series, ...)
   abline(h=mean, col="green")
-  abline(h=mean + sd, col="yellow")
-  abline(h=mean - sd, col="yellow")
-  abline(h=mean + sd*2, col="orange")
-  abline(h=mean - sd*2, col="orange")
-  abline(h=mean + sd*3, col="red")
-  abline(h=mean - sd*3, col="red")
+  abline(h=mean + sd, col="orange")
+  abline(h=mean - sd, col="orange")
+  abline(h=mean + sd*2, col="red")
+  abline(h=mean - sd*2, col="red")
+  abline(h=mean + sd*3, col="black")
+  abline(h=mean - sd*3, col="black")
 }
 
 # Plot two series and also add a line showing best fit line
@@ -42,6 +42,7 @@ maxCorrelation <- function (portfolio, securities) {
 correlatedWithConstituent <- function (portfolio, securities) {
   abs(maxCorrelation(portfolio, securities)) > 0.60
 }
+
 # rep.row and rep.col from 
 # http://www.r-bloggers.com/a-quick-way-to-do-row-repeat-and-col-repeat-rep-row-rep-col/
 rep.row<-function(x,n){
