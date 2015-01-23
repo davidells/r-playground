@@ -25,9 +25,6 @@ hedgeRatios <- rollapply(df,
 weights <- cbind( rep(1, dim(df)[1]), -hedgeRatios )
 port <- reclass(rowSums(df * weights), df)
 
-# *Note: Also worth exploring a dynamic set of weights, perhaps through the use
-# of roll apply?
-
 # Plot the portfolio price
 plotWithStdDev(port)
 
@@ -49,26 +46,33 @@ zScore <- (port - movingAvg(port, lookback)) / movingStd(port, lookback)
 units <- -zScore
 
 # Expand our units to agree with series dataframe in terms of dimensions.
-units <- rep.col(units, dim(df)[2])
-
-# Determine daily positions for each of the series, according to their portfolio
-# weight and the amount of the unit portfolio we are holding
-positions <- as.xts(units * weights * df)
-
-# Get profit and loss according to our positions and the daily
-# percent change of each security.
-pnl <- na.omit( lag(positions, 1) * (diff(df) / lag(df, 1)) )
-pnl <- as.xts( apply(pnl, 1, FUN = sum) )
-
-# Calculate gross market value (without margin, this is equal to capital invested)
-# as the absolute value of the dollar amount for each of our positions
-grossMktVal <- na.omit( abs(lag(positions, 1)) )
-grossMktVal <- as.xts( apply(grossMktVal, 1, FUN = sum) )
-
-# Finally, calculate daily returns as our daily profit and loss divided by the
-# daily gross market value.
-ret <- pnl / grossMktVal
-
+ret <- portfolio_ret(units, weights, df)
 plot(cumsum(ret), main="Cumulative Returns of USO-GLD Spread w/ Dynamic Hedge Ratio")
 
 # TODO: Finish example by using Bollinger Bands for entry / exit
+
+# Now let's use Bollinger Bands as a way to mark entry and exit points
+entryZscore <- 1
+exitZscore <- 0
+
+longsEntry <- zScore < -entryZscore
+longsExit <- zScore >= -exitZscore
+shortsEntry <- zScore > entryZscore
+shortsExit <- zScore <= exitZscore
+
+unitsLong <- rep(NA, dim(port)[1])
+unitsShort <- rep(NA, dim(port)[1])
+
+unitsLong[1] <- 0
+unitsLong[longsEntry] <- 1
+unitsLong[longsExit] <- 0
+unitsLong <- na.locf(unitsLong)
+
+unitsShort[1] <- 0
+unitsShort[shortsEntry] <- -1
+unitsShort[shortsExit] <- 0
+unitsShort <- na.locf(unitsShort)
+
+units <- unitsLong + unitsShort
+ret <- portfolio_ret(units, weights, df)
+plot(cumsum(ret), main="Cumulative Returns of USO-GLD Spread w/ Bollinger Band")
