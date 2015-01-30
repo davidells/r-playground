@@ -1,0 +1,3 @@
+To load:
+
+source("libraries/load.r", chdir=TRUE)
