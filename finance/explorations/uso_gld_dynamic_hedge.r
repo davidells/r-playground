@@ -11,19 +11,12 @@ df <- as.xts( data.frame(Ad(USO), Ad(GLD)) )
 # As in Chan's example, this is set to 20, having already been determined with
 # the benefit of hindsight
 lookback = 20
-
-# Calculate a rolling hedge ratio for this pair, over window defined by the lookback
-hedgeRatios <- rollapply(df, 
-  width = lookback, 
-  by.column = FALSE,
-  FUN = function (window) { 
-    hedgeRatio(window[,1], window[,2]) 
-})
+hedgeRatios <- hedgeRatios(df[,1], df[,2], lookback=lookback)
 
 # Create a portfolio using the securities in our data frame, weighted according
 # to the hedge ratios we just discovered.
-weights <- cbind( rep(1, dim(df)[1]), -hedgeRatios )
-port <- reclass(rowSums(df * weights), df)
+weights <- cbind( ones(rows(hedgeRatios)), -hedgeRatios )
+port <- portfolio(df, weights)
 
 # Plot the portfolio price
 plotWithStdDev(port)
@@ -49,7 +42,6 @@ units <- -zScore
 ret <- portfolio_ret(units, weights, df)
 plot(cumsum(ret), main="Cumulative Returns of USO-GLD Spread w/ Dynamic Hedge Ratio")
 
-# TODO: Finish example by using Bollinger Bands for entry / exit
 
 # Now let's use Bollinger Bands as a way to mark entry and exit points
 entryZscore <- 1
@@ -76,3 +68,4 @@ unitsShort <- na.locf(unitsShort)
 units <- unitsLong + unitsShort
 ret <- portfolio_ret(units, weights, df)
 plot(cumsum(ret), main="Cumulative Returns of USO-GLD Spread w/ Bollinger Band")
+

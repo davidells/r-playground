@@ -1,17 +1,17 @@
 # Cointegrating Augmented Dickey Fuller test. Takes
 # two series, and runs the adf test on the two spreads between
 # them using hedge ratios using the given method (ols or tls)
-cadf <- function (x, y, method="ols", ...) {
+cadf <- function (x, y, method="tls", k=1, model=2) {
   
   hedgeY <- hedgeRatio(x, y, method=method)
   
   if (method == "tls") {
-    adf <- adf(x - hedgeY * y, ...)
+    adf <- adf(x - hedgeY * y, k=k, model=model)
     
   } else if (method == "ols") {
     hedgeX <- hedgeRatio(y, x, method=method)
-    adfX <- adf(x - hedgeY*y, ...)
-    adfY <- adf(y - hedgeX*x, ...)
+    adfX <- adf(x - hedgeY*y, k=k, model=model)
+    adfY <- adf(y - hedgeX*x, k=k, model=model)
     
     if (adfX$statistic < adfY$statistic) {
       adf <- adfX
