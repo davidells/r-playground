@@ -1,6 +1,7 @@
 library(quantmod)
 library(gdata) #trim
 library(XML)
+library(parallel)
 
 # Load local libraries
 source("libraries/load.r", chdir=TRUE)
@@ -82,7 +83,7 @@ if (interactive) {
 #   what else?
 #
 # For now, just use a static hedge ratio defined via "tls" method.
-portfolios <- lapply(candidates, function(result){
+portfolios <- mclapply(candidates, function(result){
   
   # Extract price series
   pair <- result$pair
@@ -110,15 +111,137 @@ portfolios <- lapply(candidates, function(result){
       "error"="Negative lookback"))
   }
   
+  # Now create a portfolio using a dynamic hedge ratio using discovered lookback.
   # We seem to have to use OLS for rolling hedge ratios
   B <- hedgeRatios(y, x, lookback=lookback, method="ols")
   weights <- cbind( ones(rows(B)), -B )
   port <- portfolio(df, weights)
 
-  list(
-    "symbols" = result$pair$symbols,
-    "hedgeMethod" = "tls.static",
-    "weights" = na.omit(weights),
-    "portfolio" = na.omit(port)
-  )
+  result <- c(result)
+  result$hedgeMethod = "ols.moving-average"
+  result$lookback = lookback
+  result$weights = weights
+  result$series = na.omit(port)
+  
+  return (result)
+}, mc.cores = 4)
+
+# Filter out portfolios based on lookback and other factors
+# TODO: Move this to mclapply block above?
+portfolios <- Filter(function(p){  
+  if (!is.null(p$error)) {
+    return (FALSE)
+  }
+
+  if (p$lookback > 30) {
+    return (FALSE)
+  }
+  
+  if (rows(p$series) <= 0) {
+    return (FALSE)
+  }
+
+  securities <- as.xts( data.frame(p$pair$y, p$pair$x) )
+  securities <- truncateRows(securities, rows(p$series))
+  
+  falseHedge <- correlatedWithConstituent(
+    p$series, securities, threshold = 0.6)
+  
+  return (!falseHedge)
+}, portfolios)
+
+
+# Review portfolios
+if (interactive) {
+  lapply(portfolios, function(p){
+    
+    symbols <- p$pair$symbols
+    label <- paste(
+      "Porfolio of",
+      symbols[1], symbols[2], 
+      ", pVal =", round(p$cadf$p.value, 2),
+      ", lookback =", p$lookback,
+      sep = " ")
+    
+    plotWithStdDev(p$series, main = label)
+    readline( "Hit enter to continue" )
+  })
+}
+
+# Evaluate trading strategy for portfolio
+# Move this to mclapply block?
+portfolios <- lapply(portfolios, function(p){
+  
+  # TODO: Replace with bollinger band strategy
+  series <- p$series
+  lookback <- p$lookback
+  weights <- p$weights
+  
+  zScore <- (series - movingAvg(series, lookback)) / movingStd(series, lookback)
+  
+  entryZscore <- 1
+  exitZscore <- 0
+  
+  longsEntry <- zScore < -entryZscore
+  longsExit <- zScore >= -exitZscore
+  shortsEntry <- zScore > entryZscore
+  shortsExit <- zScore <= exitZscore
+  
+  unitsLong <- rep(NA, rows(series))
+  unitsShort <- rep(NA, rows(series))
+  
+  unitsLong[1] <- 0
+  unitsLong[longsEntry] <- 1
+  unitsLong[longsExit] <- 0
+  unitsLong <- na.locf(unitsLong)
+  
+  unitsShort[1] <- 0
+  unitsShort[shortsEntry] <- -1
+  unitsShort[shortsExit] <- 0
+  unitsShort <- na.locf(unitsShort)
+  
+  units <- unitsLong + unitsShort
+  
+  securities <- as.xts( data.frame(p$pair$y, p$pair$x) )
+
+  weights <- truncateRows(weights, length(units))
+  securities <- truncateRows(securities, length(units))
+  
+  returns <- portfolio_ret(units, weights, securities)
+  
+  p <- c(p)
+  p$returns <- returns
+  p$totalReturn <- sum(returns)
+  p$sharpe <- mean(returns) / sd(returns)
+  return (p)
 })
+
+# Filter portfolios based on returns
+portfolios <- Filter(function(p){
+  p$totalReturn > 0
+}, portfolios)
+
+# Rank the portfolios + strategy
+score <- sapply(portfolios, function(p){
+  #sum(p$returns)  #Total return
+  p$sharpe # Sharpe ratio
+})
+
+scoreOrder <- order(score, decreasing = TRUE)
+portfolios <- portfolios[scoreOrder]
+
+# Review returns
+if (interactive) {
+  lapply(portfolios, function(p){
+    
+    symbols <- p$pair$symbols
+    label <- paste(
+      "Cumulative returns of",
+      symbols[1], symbols[2], 
+      "(sharpe =", round(p$sharpe, 2), ")",
+      sep = " ")
+    
+    plot(cumsum(p$returns), main = label)
+    readline( "Hit enter to continue" )
+  })
+}

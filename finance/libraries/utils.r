@@ -54,3 +54,12 @@ cols <- function(x){
 ones <- function(count){
   rep(1, count)
 }
+
+truncateRows <- function(series, size, tail = FALSE) {
+  len <- rows(series)
+  if (tail == FALSE) {
+    series[((len-size)+1):len]
+  } else {
+    series[1:size]
+  }
+}
