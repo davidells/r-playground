@@ -7,12 +7,12 @@ library(XML)
 # Load local libraries
 source("libraries/load.r", chdir=TRUE)
 
-# A very basic pipeline for digging up pairs exhibiting mean reversion
-(function(global){
+# A basic pipeline for digging up pairs exhibiting mean reversion
+etfs.by.volume_best.pairs <- function(){
   
   # Constants
-  CPU_CORES <- 4
-  INTERACTIVE <- TRUE
+  CPU_CORES <- 8
+  INTERACTIVE <- FALSE
   SKIP_FETCH <- FALSE
   
   # If in interactive mode, use normal lapply, otherwise use the
@@ -27,11 +27,24 @@ source("libraries/load.r", chdir=TRUE)
   symbols <- unlist(xpathApply(doc, "//table/tr/td[1]//a", xmlValue))
   
   # Limit for debugging purposes
-  symbols <- symbols[1:10]
+  symbols <- symbols[1:50]
   
   # Fetch some bit of data for each
-  if (!SKIP_FETCH) {
-    getSymbols(symbols, from="2013-01-01")
+  # TODO: How can I save the data retrieved so I don't
+  # always have to fetch?
+  #if (!SKIP_FETCH) {
+  #  getSymbols(symbols, from="2013-01-01")
+  #}
+  
+  # If we have the data cached, use that
+  if (file.exists("/tmp/top99etf")) {
+    load("/tmp/top99etf")
+
+  # Otherwise, go fetch it, and cache it
+  } else {
+    top99etf <- new.env()
+    getSymbols(symbols, from="2013-01-01", env = top99etf, auto.assign = T)
+    save(top99etf, file = "/tmp/top99etf")
   }
   
   # Generate a (N x 2) matrix of all possible symbols pairs (ignoring order)
@@ -39,14 +52,19 @@ source("libraries/load.r", chdir=TRUE)
   
   # Create list of paired price series, for each symbol pair
   pairs <- apply(symbolPairs, 1, function(pair){
-    return( list(
+    
+    # Note we're locking ourselves into adjusted close here
+    return(list(
       symbols = pair,
-      y = Ad(get(pair[1])), 
-      x = Ad(get(pair[2])))
-    )
+      y = Ad( top99etf[[ pair[1] ]] ),
+      x = Ad( top99etf[[ pair[2] ]] )))
   })
   
+  
+  # -------------------------------------------------------------
   # Filter out pairs based on some initial assessments.
+  # -------------------------------------------------------------
+  
   # In this case, use low correlation to rule out some pairs.
   pairs <- Filter(function(pair){
     rows(pair$x) == rows(pair$y) && cor(pair$x, pair$y) > 0.5
@@ -54,6 +72,7 @@ source("libraries/load.r", chdir=TRUE)
   
   # Collect some analysis on our price series pairs, like
   # the CADF test (TODO: Add other tests)
+  # TODO: Make this pluggable
   analyzed <- list.apply(pairs, function(pair){
     list("pair" = pair, 
          "cadf" = cadf(pair$x, pair$y, method="tls"))
@@ -61,16 +80,23 @@ source("libraries/load.r", chdir=TRUE)
   
   # Filter out pairs that don't meet some test
   # result requirements
+  # TODO: Also make this pluggable
   candidates <- Filter(function(result){
     return( result$cadf$p.value < 0.05 )
   }, analyzed)
   
+  
+  
+  # -------------------------------------------------------------
   # Did our filter return nothing? If so, stop.
+  # -------------------------------------------------------------
   if (length(candidates) == 0) {
     stop("No qualified candidates.")
   }
   
+  # -------------------------------------------------------------
   # Capture table of test results.
+  # -------------------------------------------------------------
   #
   # TODO: This is just for visual stuff anyway,
   # but would be nice to have a data frame instead
@@ -91,8 +117,12 @@ source("libraries/load.r", chdir=TRUE)
     readline( "Hit enter to continue" )
   }
   
-  # Create a portfolio for each of these series, using
-  # some strategy for defining the portfolio like:
+  
+  # -------------------------------------------------------------
+  # Create a portfolio for each of these series
+  # -------------------------------------------------------------
+  
+  # Using some strategy for defining the portfolio like:
   #   static hedge ratio
   #   dynamic hedge ratio 
   #   kalman filtering
@@ -108,7 +138,7 @@ source("libraries/load.r", chdir=TRUE)
   
     # Determine weights using a static "tls" hedge ratio.
     b <- hedgeRatio(y, x, method="tls")
-    weights <- c(1, -b)
+    weights <- rep.row(c(1, -b), rows(y))
     
     # Create portfolio using given series and weights
     df <- as.xts( data.frame(y, x) )
@@ -121,7 +151,8 @@ source("libraries/load.r", chdir=TRUE)
     if (INTERACTIVE) {
       cat(
         "Pair: ", pair$symbols, ", ",
-        "Lookback:", lookback, "\n")
+        "Lookback:", lookback, "\n",
+        "Length(weights):", length(weights), "\n")
     }
     
     # The lookback should also be used here to filter out the candidate.
@@ -133,14 +164,13 @@ source("libraries/load.r", chdir=TRUE)
         "error"="Negative lookback"))
     }
     
-    # Now create a portfolio using a dynamic hedge ratio using discovered lookback.
-    # We seem to have to use OLS for rolling hedge ratios
-    B <- hedgeRatios(y, x, lookback=lookback, method="ols")
-    weights <- cbind( ones(rows(B)), -B )
-    port <- portfolio(df, weights)
+    # Dynamic hedge ratio based on lookback
+    # -------------------------------------
+    # B <- hedgeRatios(y, x, lookback=lookback, method="ols")
+    # weights <- cbind( ones(rows(B)), -B )
+    # port <- portfolio(df, weights)
   
     result <- c(result)
-    result$hedgeMethod = "ols.moving-average"
     result$lookback = lookback
     result$weights = weights
     result$series = na.omit(port)
@@ -148,8 +178,9 @@ source("libraries/load.r", chdir=TRUE)
     return (result)
   })
   
-  # Filter out portfolios based on lookback and other factors
-  # TODO: Move this to mclapply block above?
+  # -------------------------------------------------------------
+  # Filter out portfolios based on their attributes
+  # -------------------------------------------------------------
   portfolios <- Filter(function(p){  
     if (!is.null(p$error)) {
       return (FALSE)
@@ -164,17 +195,21 @@ source("libraries/load.r", chdir=TRUE)
     }
   
     securities <- as.xts( data.frame(p$pair$y, p$pair$x) )
-    securities <- truncateRows(securities, rows(p$series))
+    securities <- chompRows(securities, rows(p$series))
     
     falseHedge <- correlatedWithConstituent(
       p$series, securities, threshold = 0.6)
     
+    # Anything else?
+    
     return (!falseHedge)
   }, portfolios)
+  
   
   if (INTERACTIVE) {
     cat("Portfolios after initial filtering: ", length(portfolios))
   }
+  
   
   # Review portfolios
   if (INTERACTIVE) {
@@ -193,15 +228,24 @@ source("libraries/load.r", chdir=TRUE)
     })
   }
   
+  
+  # -------------------------------------------------------------
   # Apply trading strategy to portfolios to create return series
-  portfolios <- list.apply(portfolios, function(p){
+  # -------------------------------------------------------------
+  
+  portfolios <- lapply(portfolios, function(p){
     
     # TODO: Put bollinger band strategy in function
+    # TODO: Make strategy pluggable
     series <- p$series
     lookback <- p$lookback
     weights <- p$weights
     
-    zScore <- (series - movingAvg(series, lookback)) / movingStd(series, lookback)
+    # zScore based on rolling average and standard deviation
+    # zScore <- (series - movingAvg(series, lookback)) / movingStd(series, lookback)
+    
+    # zScore based on static mean and standard deviation
+     zScore <- (series - mean(series)) / sd(series)
     
     entryZscore <- 1
     exitZscore <- 0
@@ -235,11 +279,11 @@ source("libraries/load.r", chdir=TRUE)
     
     securities <- as.xts( data.frame(p$pair$y, p$pair$x) )
 
-    weights <- truncateRows(weights, length(units))
-    securities <- truncateRows(securities, length(units))
+    weights <- chompRows(weights, length(units))
+    securities <- chompRows(securities, length(units))
     
     returns <- portfolio_ret(units, weights, securities)
-
+    
     p <- c(p)
     p$returns <- returns
     p$totalReturn <- sum(returns)
@@ -248,12 +292,17 @@ source("libraries/load.r", chdir=TRUE)
     return (p)
   })
   
+  # -------------------------------------------------------------
   # Filter portfolios based on returns or other evaluation
+  # -------------------------------------------------------------
   portfolios <- Filter(function(p){
-    is.null(p$error) && p$totalReturn > 0 && p$annualSharpe > 0
+    is.null(p$error) && p$totalReturn > 0.1 && p$annualSharpe > 0.5
   }, portfolios)
   
-  # Rank the portfolios + strategy
+  
+  # -------------------------------------------------------------
+  # Rank the overall portfolio and strategy
+  # -------------------------------------------------------------
   score <- sapply(portfolios, function(p){
     #sum(p$returns)  #Total return
     p$annualSharpe # Sharpe ratio
@@ -262,6 +311,8 @@ source("libraries/load.r", chdir=TRUE)
   # Sort the portfolios by their score
   portfolios <- 
     portfolios[order(score, decreasing=TRUE)]
+  
+  # TODO: Support arbitrary limit on the number of returned portfolios here?
   
   # Review returns
   if (INTERACTIVE) {
@@ -279,8 +330,10 @@ source("libraries/load.r", chdir=TRUE)
       readline( "Hit enter to continue" )
     })
   }
-
-  # Export results to global environment
-  global$portfolios <- portfolios
   
-})(parent.frame())
+  return( portfolios )
+}
+
+# What to do with this output? 
+# porfolios <- etfs.by.volume_best.pairs()
+# lapply

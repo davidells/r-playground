@@ -19,9 +19,10 @@ portfolio <- function (securities, weights) {
   }
 }
 
-# Given the units of the portfolio to hold (N x 1), the weights for the instruments (N x M), and the
-# price series (N x M), return an (N x 1) return series.
+# Given the units of the portfolio to hold (N x 1), the weights for the instruments (N x M), 
+# and the price series (N x M), return an (N x 1) return series.
 portfolio_ret <- function (units, weights, df) {
+  
   # Expand weights series to fit dataframe dimensions, if needed
   if (rows(weights) == 1) {
     weights <- rep.row(weights, rows(df))
@@ -47,5 +48,8 @@ portfolio_ret <- function (units, weights, df) {
   # Finally, calculate daily returns as our daily profit and loss divided by the
   # daily gross market value.
   ret <- pnl / grossMktVal
+  if (is.na(ret[1])) {
+    ret[1] <- 0
+  }
   ret <- na.fill( ret, 0 )
 }
