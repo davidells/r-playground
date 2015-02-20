@@ -29,17 +29,9 @@ etfs.by.volume_best.pairs <- function(){
   # Limit for debugging purposes
   symbols <- symbols[1:50]
   
-  # Fetch some bit of data for each
-  # TODO: How can I save the data retrieved so I don't
-  # always have to fetch?
-  #if (!SKIP_FETCH) {
-  #  getSymbols(symbols, from="2013-01-01")
-  #}
-  
   # If we have the data cached, use that
   if (file.exists("/tmp/top99etf")) {
     load("/tmp/top99etf")
-
   # Otherwise, go fetch it, and cache it
   } else {
     top99etf <- new.env()
@@ -54,6 +46,8 @@ etfs.by.volume_best.pairs <- function(){
   pairs <- apply(symbolPairs, 1, function(pair){
     
     # Note we're locking ourselves into adjusted close here
+    # TODO: That's a big deal and we need to consider attaching the whole
+    # OHLC structure here instead.
     return(list(
       symbols = pair,
       y = Ad( top99etf[[ pair[1] ]] ),
@@ -136,16 +130,18 @@ etfs.by.volume_best.pairs <- function(){
     y <- pair$y
     x <- pair$x
   
-    # Determine weights using a static "tls" hedge ratio.
+    # -------------------------------------
+    # Static hedge ratio using "tls" (beware of data snooping bias)
+    # -------------------------------------
+    hedge.lookback <- 0
     b <- hedgeRatio(y, x, method="tls")
     weights <- rep.row(c(1, -b), rows(y))
-    
-    # Create portfolio using given series and weights
     df <- as.xts( data.frame(y, x) )
     port <- portfolio(df, weights)
     
-    # Use this portfolio series to discover a lookback
-    # that can power a dynamic hedge ratio.
+    # -------------------------------------
+    # Capture lookback
+    # -------------------------------------
     lookback <- round(halflife(port))
     
     if (INTERACTIVE) {
@@ -164,14 +160,25 @@ etfs.by.volume_best.pairs <- function(){
         "error"="Negative lookback"))
     }
     
-    # Dynamic hedge ratio based on lookback
     # -------------------------------------
-    # B <- hedgeRatios(y, x, lookback=lookback, method="ols")
+    # Dynamic hedge ratio based on arbitrary N
+    # -------------------------------------
+    # hedge.lookback <- 100
+    # B <- hedgeRatios(y, x, lookback=100, method="ols")
     # weights <- cbind( ones(rows(B)), -B )
     # port <- portfolio(df, weights)
+    
+    # -------------------------------------
+    # Dynamic hedge ratio based on lookback
+    # -------------------------------------
+     hedge.lookback <- lookback
+     B <- hedgeRatios(y, x, lookback=lookback, method="ols")
+     weights <- cbind( ones(rows(B)), -B )
+     port <- portfolio(df, weights)
   
     result <- c(result)
     result$lookback = lookback
+    result$hedge.lookback = hedge.lookback
     result$weights = weights
     result$series = na.omit(port)
     
@@ -214,39 +221,18 @@ etfs.by.volume_best.pairs <- function(){
   # Review portfolios
   if (INTERACTIVE) {
     lapply(portfolios, function(p){
-      
-      symbols <- p$pair$symbols
-      label <- paste(
-        "Porfolio of",
-        symbols[1], symbols[2], 
-        ", pVal =", round(p$cadf$p.value, 2),
-        ", lookback =", p$lookback,
-        sep = " ")
-      
-      plotWithStdDev(p$series, main = label)
+      portfolio.plots.price(p)
       readline( "Hit enter to continue" )
     })
   }
   
   
-  # -------------------------------------------------------------
-  # Apply trading strategy to portfolios to create return series
-  # -------------------------------------------------------------
   
-  portfolios <- lapply(portfolios, function(p){
-    
-    # TODO: Put bollinger band strategy in function
-    # TODO: Make strategy pluggable
-    series <- p$series
-    lookback <- p$lookback
-    weights <- p$weights
-    
-    # zScore based on rolling average and standard deviation
-    # zScore <- (series - movingAvg(series, lookback)) / movingStd(series, lookback)
-    
-    # zScore based on static mean and standard deviation
-     zScore <- (series - mean(series)) / sd(series)
-    
+  # TODO: Move this function somewhere?
+  # ------------------------------
+  # Define some trading strategies
+  # ------------------------------
+  bollinger.band <- function (zScore) {
     entryZscore <- 1
     exitZscore <- 0
     
@@ -255,8 +241,8 @@ etfs.by.volume_best.pairs <- function(){
     shortsEntry <- zScore > entryZscore
     shortsExit <- zScore <= exitZscore
     
-    unitsLong <- rep(NA, rows(series))
-    unitsShort <- rep(NA, rows(series))
+    unitsLong <- rep(NA, rows(zScore))
+    unitsShort <- rep(NA, rows(zScore))
     
     unitsLong[1] <- 0
     unitsLong[longsEntry] <- 1
@@ -269,6 +255,44 @@ etfs.by.volume_best.pairs <- function(){
     unitsShort <- na.locf(unitsShort)
     
     units <- unitsLong + unitsShort
+  }
+  
+  # -------------------------------------------------------------
+  # Apply trading strategy to portfolios to create return series
+  # -------------------------------------------------------------
+  portfolios <- lapply(portfolios, function(p){
+    
+    # TODO: Put bollinger band strategy in function
+    # TODO: Make strategy pluggable
+    series <- p$series
+    lookback <- p$lookback
+    hedge.lookback <- p$hedge.lookback
+    weights <- p$weights
+    
+    # -----------------------------------
+    # zScore based on rolling average and standard deviation (lookback)
+    # -----------------------------------
+     zScore <- (series - movingAvg(series, lookback)) / movingStd(series, lookback)
+    
+    # -----------------------------------
+    # zScore based on rolling average and standard deviation (hedge.lookback)
+    # -----------------------------------
+    # zScore <- (series - movingAvg(series, hedge.lookback)) / movingStd(series, hedge.lookback)
+    
+    # -----------------------------------
+    # zScore based on static mean and standard deviation
+    # -----------------------------------
+    # zScore <- (series - mean(series)) / sd(series)
+    
+    # -----------------------------------
+    # Determine units directly as -zScore 
+    # -----------------------------------
+     units <- -zScore
+    
+    # -----------------------------------
+    # Determine units using bollinger band strategy
+    # -----------------------------------
+    # units <- bollinger.band(zScore)
     
     if (length(units) <= 1) {
       return(list(
@@ -285,10 +309,11 @@ etfs.by.volume_best.pairs <- function(){
     returns <- portfolio_ret(units, weights, securities)
     
     p <- c(p)
+    p$units <- units
     p$returns <- returns
-    p$totalReturn <- sum(returns)
-    p$annualSharpe <- PerformanceAnalytics::SharpeRatio.annualized(returns)
-    p$annualReturn <- PerformanceAnalytics::Return.annualized(returns)
+    p$return.total <- sum(returns)
+    p$sharpe.annual <- PerformanceAnalytics::SharpeRatio.annualized(returns)
+    p$return.annual <- PerformanceAnalytics::Return.annualized(returns)
     return (p)
   })
   
@@ -296,7 +321,7 @@ etfs.by.volume_best.pairs <- function(){
   # Filter portfolios based on returns or other evaluation
   # -------------------------------------------------------------
   portfolios <- Filter(function(p){
-    is.null(p$error) && p$totalReturn > 0.1 && p$annualSharpe > 0.5
+    is.null(p$error) && p$return.total > 0.1 && p$sharpe.annual > 0.5
   }, portfolios)
   
   
@@ -305,7 +330,7 @@ etfs.by.volume_best.pairs <- function(){
   # -------------------------------------------------------------
   score <- sapply(portfolios, function(p){
     #sum(p$returns)  #Total return
-    p$annualSharpe # Sharpe ratio
+    p$sharpe.annual # Sharpe ratio
   })
   
   # Sort the portfolios by their score
@@ -317,16 +342,7 @@ etfs.by.volume_best.pairs <- function(){
   # Review returns
   if (INTERACTIVE) {
     lapply(portfolios, function(p){
-      
-      symbols <- p$pair$symbols
-      label <- paste(
-        "Cumulative returns of",
-        symbols[1], symbols[2], "\n",
-        "  sharpe ratio =", round(p$annualSharpe, 2), "\n",
-        "  annual return =", round(p$annualReturn, 2),
-        sep = " ")
-      
-      plot(cumsum(p$returns), main = label)
+      portfolio.plots.return(p)
       readline( "Hit enter to continue" )
     })
   }
@@ -334,6 +350,53 @@ etfs.by.volume_best.pairs <- function(){
   return( portfolios )
 }
 
-# What to do with this output? 
-# porfolios <- etfs.by.volume_best.pairs()
-# lapply
+portfolio.plots.return <- function (p) {
+  symbols <- p$pair$symbols
+  label <- paste(
+    "Cumulative returns of",
+    symbols[1], symbols[2], "\n",
+    "  sharpe ratio =", round(p$sharpe.annual, 2), "\n",
+    "  annual return =", round(p$return.annual, 2),
+    sep = " ")
+  
+  plot(cumsum(p$returns), main=label)
+}
+
+portfolio.plots.price <- function (p) {
+  symbols <- p$pair$symbols
+  label <- paste(
+    "Porfolio of",
+    symbols[1], symbols[2], 
+    ", pVal =", round(p$cadf$p.value, 2),
+    ", lookback =", p$lookback,
+    sep = " ")
+  
+  plotWithStdDev(p$series, main=label)
+}
+
+portfolio.plots.position <- function (p) {
+  symbols <- p$pair$symbols
+  label <- paste(
+    "Position in",
+    symbols[1], symbols[2], 
+    sep = " ")
+  
+  plotWithStdDev(p$units, main=label, type="l")
+}
+
+
+portfolios <- etfs.by.volume_best.pairs()
+
+# TODO: More general way to do this?
+portfolio.results <- (function(){
+  symbolMatrix <- t( sapply(portfolios, function(p) p$pair$symbols) )
+  data.frame( 
+    "y" = symbolMatrix[,1], 
+    "x" = symbolMatrix[,2],
+    "cadf.pval" = sapply(portfolios, function(p) p$cadf$p.value),
+    "lookback" = sapply(portfolios, function(p) p$lookback),
+    "hedge.lookback" = sapply(portfolios, function(p) p$hedge.lookback),
+    "sharpe.annual" = sapply(portfolios, function(p) p$sharpe.annual),
+    "return.annual" = sapply(portfolios, function(p) p$return.annual),
+    "return.total" = sapply(portfolios, function(p) p$return.total))
+})()
