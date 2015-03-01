@@ -7,51 +7,132 @@ library(XML)
 # Load local libraries
 source("libraries/load.r", chdir=TRUE)
 
-# A basic pipeline for digging up pairs exhibiting mean reversion
 etfs.by.volume_best.pairs <- function(){
+  
+  strategy <- list(
+    
+    # Get tickers of top 100 ETFs by volume, and provide every
+    # possible pair among them.
+    "getSymbolPairs"=function(){
+      
+      # Get tickers of top 100 ETFs by volume from barchart.com
+      url <- "http://www.barchart.com/etf/vleaders.php"
+      doc <- htmlTreeParse(url, useInternalNodes=TRUE)
+      symbols <- unlist(xpathApply(doc, "//table/tbody/tr/td[1]//a", xmlValue))
+      
+      # Limit for debugging purposes
+      symbols <- symbols[1:50]
+      
+      # Generate a (N x 2) matrix of all possible symbols pairs (ignoring order)
+      symbolPairs <- t(combn(symbols, 2))
+    },
+    
+    
+    # Get daily data from Yahoo, and cache it. Note, you need
+    # to delete the cache file if you change the symbols handed in
+    "getStockData" = function() {
+      
+      # If we have the data cached, use that
+      if (file.exists("/tmp/top99etf")) {
+        load("/tmp/top99etf")
+        
+      # Otherwise, go fetch it, and cache it
+      } else {
+        top99etf <- new.env()
+        getSymbols(symbols, from="2013-01-01", env = top99etf, auto.assign = T)
+        save(top99etf, file = "/tmp/top99etf")
+      }
+      
+      return( top99etf )
+    },
+    
+    
+    # Analyze the pair
+    "analyzePair" = function(pair) {
+      reject <- function(reason) {
+        list("reject" = reason)
+      }
+      
+      y <- pair$y
+      x <- pair$x
+      
+      # Reject pairs that are not correlated
+      # TODO: Make the threshold here a parameter of this strategy?
+      if (cor(pair$x, pair$y) < 0.5) { 
+        return(reject("Pair does exhibit initial correlation"))
+      }
+  
+      # Collect some analysis on our price series pairs, like
+      # the CADF test (TODO: Add other tests)
+      cadf.results <- cadf(x, y, method="tls")
+      
+      # Reject pairs that fail the CADF test
+      if (cadf.results$p.value > 0.05) {
+        return(reject("CADF pValue too high (must be under 0.05)"))
+      }
+      
+      # ------------------------------------------------
+      # Capture lookback using "tls" static hedge ratio 
+      # (warning: data snooping bias here!)
+      # ------------------------------------------------
+      df <- as.xts( data.frame(y, x) )
+      b <- hedgeRatio(y, x, method="tls")
+      weights <- rep.row(c(1, -b), rows(y))
+      port <- portfolio(df, weights)
+      lookback <- round(halflife(port))
+      
+      if (lookback < 0 || lookback > rows(port)) {
+        return(reject(
+          paste("Lookback (sign of mean reversion) must be above ",
+                "0 and less than total size of data")))
+      }
+      
+      list(
+        "cadf" = cadf.results,
+        "lookback" = lookback
+      )
+    },
+    
+    
+    "getTestTableValues" = function(result) {
+      list(
+        "cadf.pval" = result$cadf$p.value,
+        "lookback" = result$lookback)
+    }
+  )
+  
+  # Run it through the pairs pipeline
+  pairs.pipeline(strategy)
+}
+
+# A basic pipeline for digging up pairs exhibiting mean reversion
+pairs.pipeline <- function(strategy){
   
   # Constants
   CPU_CORES <- 8
   INTERACTIVE <- FALSE
+  DEBUG <- FALSE
   SKIP_FETCH <- FALSE
   
   # If in interactive mode, use normal lapply, otherwise use the
   # parallel mclapply version
-  list.apply <- if (INTERACTIVE) lapply else function(xs, fun){
+  list.compute <- if (DEBUG) lapply else function(xs, fun){
     mclapply(xs, fun, mc.cores=CPU_CORES)
   }
   
-  # Get tickers of top 99 ETFs by volume
-  url <- "http://etfdb.com/compare/volume/"
-  doc <- htmlTreeParse(url, useInternalNodes=TRUE)
-  symbols <- unlist(xpathApply(doc, "//table/tr/td[1]//a", xmlValue))
-  
-  # Limit for debugging purposes
-  symbols <- symbols[1:50]
-  
-  # If we have the data cached, use that
-  if (file.exists("/tmp/top99etf")) {
-    load("/tmp/top99etf")
-  # Otherwise, go fetch it, and cache it
-  } else {
-    top99etf <- new.env()
-    getSymbols(symbols, from="2013-01-01", env = top99etf, auto.assign = T)
-    save(top99etf, file = "/tmp/top99etf")
-  }
-  
-  # Generate a (N x 2) matrix of all possible symbols pairs (ignoring order)
-  symbolPairs <- t(combn(symbols, 2))
+  # Get symbol pairs and price data from specific strategy
+  symbolPairs <- strategy$getSymbolPairs()
+  priceData <- strategy$getStockData()
   
   # Create list of paired price series, for each symbol pair
   pairs <- apply(symbolPairs, 1, function(pair){
-    
     # Note we're locking ourselves into adjusted close here
     # TODO: That's a big deal and we need to consider attaching the whole
     # OHLC structure here instead.
     return(list(
       symbols = pair,
-      y = Ad( top99etf[[ pair[1] ]] ),
-      x = Ad( top99etf[[ pair[2] ]] )))
+      y = Ad( priceData[[ pair[1] ]] ),
+      x = Ad( priceData[[ pair[2] ]] )))
   })
   
   
@@ -59,27 +140,26 @@ etfs.by.volume_best.pairs <- function(){
   # Filter out pairs based on some initial assessments.
   # -------------------------------------------------------------
   
-  # In this case, use low correlation to rule out some pairs.
+  # The data between the pairs should align
   pairs <- Filter(function(pair){
-    rows(pair$x) == rows(pair$y) && cor(pair$x, pair$y) > 0.5
+    rows(pair$x) == rows(pair$y)
   }, pairs)
   
   # Collect some analysis on our price series pairs, like
   # the CADF test (TODO: Add other tests)
   # TODO: Make this pluggable
-  analyzed <- list.apply(pairs, function(pair){
-    list("pair" = pair, 
-         "cadf" = cadf(pair$x, pair$y, method="tls"))
+  analyzed <- list.compute(pairs, function(pair){
+    c(list("pair" = pair), 
+      strategy$analyzePair(pair))
   })
   
   # Filter out pairs that don't meet some test
   # result requirements
   # TODO: Also make this pluggable
+  #candidates <- Filter(strategy$filterAnalyzed, analyzed)
   candidates <- Filter(function(result){
-    return( result$cadf$p.value < 0.05 )
+    is.null(result$reject)
   }, analyzed)
-  
-  
   
   # -------------------------------------------------------------
   # Did our filter return nothing? If so, stop.
@@ -95,14 +175,15 @@ etfs.by.volume_best.pairs <- function(){
   # TODO: This is just for visual stuff anyway,
   # but would be nice to have a data frame instead
   # of a matrix, with correct types for the test results.
-  testResults <- unlist(list.apply(candidates, function(result) {
-    list(result$pair$symbols, 
-         result$cadf$p.value)
+  testResults <- unlist(lapply(candidates, function(result) {
+    list("y" = result$pair$symbols[[1]], 
+         "x" = result$pair$symbols[[2]], 
+         strategy[['getTestTableValues']](result))
   }))
   
   tableCols <- length(candidates[[1]]) + 1
   testResults <- matrix(testResults, ncol=tableCols, byrow=TRUE)
-  colnames(testResults) <- c("y", "x", "cadf.pval")
+  colnames(testResults) <- c("y", "x", names(candidates[[1]])[-1])
   rownames(testResults) <- seq(rows(testResults))
   
   # A good time to stop and look at testResults.
@@ -123,50 +204,32 @@ etfs.by.volume_best.pairs <- function(){
   #   what else?
   #
   # For now, just use a static hedge ratio defined via "tls" method.
-  portfolios <- list.apply(candidates, function(result){
+  portfolios <- list.compute(candidates, function(result){
     
     # Extract price series
     pair <- result$pair
     y <- pair$y
     x <- pair$x
-  
-    # -------------------------------------
-    # Static hedge ratio using "tls" (beware of data snooping bias)
-    # -------------------------------------
-    hedge.lookback <- 0
-    b <- hedgeRatio(y, x, method="tls")
-    weights <- rep.row(c(1, -b), rows(y))
     df <- as.xts( data.frame(y, x) )
-    port <- portfolio(df, weights)
+    lookback <- result$lookback
+  
+    # collect portfolio data
     
     # -------------------------------------
-    # Capture lookback
+    # Static hedge ratio using "tls" (warning: data snooping bias here!)
     # -------------------------------------
-    lookback <- round(halflife(port))
-    
-    if (INTERACTIVE) {
-      cat(
-        "Pair: ", pair$symbols, ", ",
-        "Lookback:", lookback, "\n",
-        "Length(weights):", length(weights), "\n")
-    }
-    
-    # The lookback should also be used here to filter out the candidate.
-    # Should that be achieved earlier in processing somehow? At any rate,
-    # if it's negative, we can do no more
-    if (lookback <= 0 || lookback > rows(port)) {
-      return(list(
-        "symbols"=result$pair$symbols,
-        "error"="Negative lookback"))
-    }
+    #hedge.lookback <- 0
+    #b <- hedgeRatio(y, x, method="tls")
+    #weights <- rep.row(c(1, -b), rows(y))
+    #port <- portfolio(df, weights)
     
     # -------------------------------------
     # Dynamic hedge ratio based on arbitrary N
     # -------------------------------------
-    # hedge.lookback <- 100
-    # B <- hedgeRatios(y, x, lookback=100, method="ols")
-    # weights <- cbind( ones(rows(B)), -B )
-    # port <- portfolio(df, weights)
+    #hedge.lookback <- 100
+    #B <- hedgeRatios(y, x, lookback=hedge.lookback, method="ols")
+    #weights <- cbind( ones(rows(B)), -B )
+    #port <- portfolio(df, weights)
     
     # -------------------------------------
     # Dynamic hedge ratio based on lookback
@@ -175,9 +238,8 @@ etfs.by.volume_best.pairs <- function(){
      B <- hedgeRatios(y, x, lookback=lookback, method="ols")
      weights <- cbind( ones(rows(B)), -B )
      port <- portfolio(df, weights)
-  
+
     result <- c(result)
-    result$lookback = lookback
     result$hedge.lookback = hedge.lookback
     result$weights = weights
     result$series = na.omit(port)
@@ -189,14 +251,6 @@ etfs.by.volume_best.pairs <- function(){
   # Filter out portfolios based on their attributes
   # -------------------------------------------------------------
   portfolios <- Filter(function(p){  
-    if (!is.null(p$error)) {
-      return (FALSE)
-    }
-  
-    if (p$lookback > 30) {
-      return (FALSE)
-    }
-    
     if (rows(p$series) <= 0) {
       return (FALSE)
     }
@@ -208,8 +262,8 @@ etfs.by.volume_best.pairs <- function(){
       p$series, securities, threshold = 0.6)
     
     # Anything else?
-    
     return (!falseHedge)
+    
   }, portfolios)
   
   
@@ -260,9 +314,8 @@ etfs.by.volume_best.pairs <- function(){
   # -------------------------------------------------------------
   # Apply trading strategy to portfolios to create return series
   # -------------------------------------------------------------
-  portfolios <- lapply(portfolios, function(p){
+  portfolios <- list.compute(portfolios, function(p){
     
-    # TODO: Put bollinger band strategy in function
     # TODO: Make strategy pluggable
     series <- p$series
     lookback <- p$lookback
@@ -272,29 +325,29 @@ etfs.by.volume_best.pairs <- function(){
     # -----------------------------------
     # zScore based on rolling average and standard deviation (lookback)
     # -----------------------------------
-     zScore <- (series - movingAvg(series, lookback)) / movingStd(series, lookback)
+    # zScore <- (series - movingAvg(series, lookback)) / movingStd(series, lookback)
     
     # -----------------------------------
     # zScore based on rolling average and standard deviation (hedge.lookback)
     # -----------------------------------
-    # zScore <- (series - movingAvg(series, hedge.lookback)) / movingStd(series, hedge.lookback)
+     zScore <- (series - movingAvg(series, hedge.lookback)) / movingStd(series, hedge.lookback)
     
     # -----------------------------------
-    # zScore based on static mean and standard deviation
+    # zScore based on static mean and standard deviation (warning: data snooping bias here!)
     # -----------------------------------
     # zScore <- (series - mean(series)) / sd(series)
     
     # -----------------------------------
     # Determine units directly as -zScore 
     # -----------------------------------
-     units <- -zScore
+    # units <- -zScore
     
     # -----------------------------------
     # Determine units using bollinger band strategy
     # -----------------------------------
-    # units <- bollinger.band(zScore)
+     units <- bollinger.band(zScore)
     
-    if (length(units) <= 1) {
+    if (length(units) <= 1 || all(is.na(units))) {
       return(list(
         "symbols"=p$pair$symbols,
         "error"="Not enough transactions in strategy"
@@ -353,11 +406,11 @@ etfs.by.volume_best.pairs <- function(){
 portfolio.plots.return <- function (p) {
   symbols <- p$pair$symbols
   label <- paste(
-    "Cumulative returns of",
-    symbols[1], symbols[2], "\n",
-    "  sharpe ratio =", round(p$sharpe.annual, 2), "\n",
-    "  annual return =", round(p$return.annual, 2),
-    sep = " ")
+    "Cumulative returns of ",
+    symbols[1], " ", symbols[2], "\n",
+    "  sharpe ratio = ", round(p$sharpe.annual, 2), ", ",
+    "  annual return = ", round(p$return.annual, 2),
+    sep = "")
   
   plot(cumsum(p$returns), main=label)
 }
@@ -384,6 +437,12 @@ portfolio.plots.position <- function (p) {
   plotWithStdDev(p$units, main=label, type="l")
 }
 
+portfolio.plots <- function (p) {
+  portfolio.plots.price(p)
+  portfolio.plots.position(p)
+  portfolio.plots.return(p)
+}
+
 
 portfolios <- etfs.by.volume_best.pairs()
 
@@ -400,3 +459,5 @@ portfolio.results <- (function(){
     "return.annual" = sapply(portfolios, function(p) p$return.annual),
     "return.total" = sapply(portfolios, function(p) p$return.total))
 })()
+
+portfolio.plots(portfolios[[1]])
