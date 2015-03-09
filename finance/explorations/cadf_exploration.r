@@ -11,7 +11,7 @@ print(cadf.best(Ad(XLE), Ad(USO)))
 
 # Huh, ok, not a cointegrating pair it seems. pValue of 0.39 is not indicating mean reversion.
 # Let's take a look. 
-sprd <- Ad(USO) - hedgeRatio(Ad(USO), Ad(XLE), method="ols") * Ad(XLE)
+sprd <- Ad(USO) - hedgeRatio(Ad(XLE), Ad(USO), method="ols") * Ad(XLE)
 plot(sprd)
 
 # Hm, starting with 2009, it look much more stable, let's try the subset and see what we get...
@@ -20,7 +20,7 @@ USO <- USO["2009-01-01::"]
 print(cadf.best(Ad(XLE), Ad(USO)))
 
 # Indeed, a p-value of 0.04 is much better. Let's see this spread, with standard deviations.
-sprd <- Ad(USO) - hedgeRatio(Ad(USO), Ad(XLE), method="ols") * Ad(XLE)
+sprd <- Ad(USO) - hedgeRatio(Ad(XLE), Ad(USO), method="ols") * Ad(XLE)
 dimnames(sprd)[2] <- "USO.XLE.Spread"
 plotWithStdDev(sprd)
 
@@ -47,7 +47,7 @@ print(cadf.best(Ad(EWA), Ad(EWC)))
 # Ah, there's a very low p-value.
 # Let's plot the spread between EWA and EWC (note it's not necessarily the spread
 # that gave us our cadf.pValue result).
-sprd <- Ad(EWC) - hedgeRatio(Ad(EWC), Ad(EWA), method="ols") * Ad(EWA)
+sprd <- Ad(EWC) - hedgeRatio(Ad(EWA), Ad(EWC), method="ols") * Ad(EWA)
 plotWithStdDev(sprd)
 
 # And the half life here?

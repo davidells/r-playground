@@ -9,10 +9,19 @@ source("libraries/load.r", chdir=TRUE)
 
 etfs.by.volume_best.pairs <- function(){
   
+# ----------------------------------------------------------------
+# ----------------------------------------------------------------
+# Define strategy
+# ----------------------------------------------------------------
+# ----------------------------------------------------------------
   strategy <- list(
     
+    # -------------------------------
+    # getSymbolPairs
+    #
     # Get tickers of top 100 ETFs by volume, and provide every
     # possible pair among them.
+    # -------------------------------
     "getSymbolPairs"=function(){
       
       # Get tickers of top 100 ETFs by volume from barchart.com
@@ -28,9 +37,14 @@ etfs.by.volume_best.pairs <- function(){
     },
     
     
+    # -------------------------------
+    # getStockData:
+    #
     # Get daily data from Yahoo, and cache it. Note, you need
     # to delete the cache file if you change the symbols handed in
-    "getStockData" = function() {
+    # -------------------------------
+    "getStockData" = function(symbolPairs) {
+      symbols <- unique(as.vector(symbolPairs))
       
       # If we have the data cached, use that
       if (file.exists("/tmp/top99etf")) {
@@ -47,8 +61,16 @@ etfs.by.volume_best.pairs <- function(){
     },
     
     
-    # Analyze the pair
+    # -------------------------------
+    # analyzePair:
+    #
+    # Reject pairs that are not correlated.
+    # Require pairs to have a CADF p value of 95% or higher (testing cointegration).
+    # Determine the "lookback" for rolling hedge ratios, moving averages, etc. In this
+    #   case, use the "halflife" (time to mean reversion) of the portfolio price series.
+    # -------------------------------
     "analyzePair" = function(pair) {
+      
       reject <- function(reason) {
         list("reject" = reason)
       }
@@ -76,7 +98,7 @@ etfs.by.volume_best.pairs <- function(){
       # (warning: data snooping bias here!)
       # ------------------------------------------------
       df <- as.xts( data.frame(y, x) )
-      b <- hedgeRatio(y, x, method="tls")
+      b <- hedgeRatio(x, y, method="tls")
       weights <- rep.row(c(1, -b), rows(y))
       port <- portfolio(df, weights)
       lookback <- round(halflife(port))
@@ -93,11 +115,71 @@ etfs.by.volume_best.pairs <- function(){
       )
     },
     
-    
+    # --------------------------------------------------
+    # getTestTableValues
+    #
+    # Utility function, return specific numbers from analysis above
+    # --------------------------------------------------
     "getTestTableValues" = function(result) {
+      
       list(
         "cadf.pval" = result$cadf$p.value,
         "lookback" = result$lookback)
+    },
+    
+    # --------------------------------------------------
+    # createPortfolio
+    #
+    # Create a portfolio using a rolling hedge ratio based on 
+    # the lookback given from the analysis step.
+    # --------------------------------------------------
+    "createPortfolio" = function(candidate) {
+      
+      # Create using some strategy for defining the portfolio like:
+      #   static hedge ratio
+      #   dynamic hedge ratio 
+      #   kalman filtering
+      #   what else?
+      
+      # Extract price series
+      pair <- candidate$pair
+      y <- pair$y
+      x <- pair$x
+      df <- as.xts( data.frame(y, x) )
+      lookback <- candidate$lookback
+      
+      # collect portfolio data
+      
+      # -------------------------------------
+      # Static hedge ratio using "tls" (warning: data snooping bias here!)
+      # -------------------------------------
+      #hedge.lookback <- 0
+      #b <- hedgeRatio(x, y, method="tls")
+      #weights <- rep.row(c(1, -b), rows(y))
+      #port <- portfolio(df, weights)
+      
+      # -------------------------------------
+      # Dynamic hedge ratio based on arbitrary N
+      # -------------------------------------
+      #hedge.lookback <- 100
+      #B <- hedgeRatios(x, y, lookback=hedge.lookback, method="ols")
+      #weights <- cbind( ones(rows(B)), -B )
+      #port <- portfolio(df, weights)
+      
+      # -------------------------------------
+      # Dynamic hedge ratio based on lookback
+      # -------------------------------------
+      hedge.lookback <- lookback
+      B <- hedgeRatios(x, y, lookback=lookback, method="ols")
+      weights <- cbind( ones(rows(B)), -B )
+      port <- portfolio(df, weights)
+      
+      candidate <- c(candidate)
+      candidate$hedge.lookback = hedge.lookback
+      candidate$weights = weights
+      candidate$series = na.omit(port)
+      
+      return (candidate)
     }
   )
   
@@ -105,7 +187,13 @@ etfs.by.volume_best.pairs <- function(){
   pairs.pipeline(strategy)
 }
 
+
+# ----------------------------------------------------------------
+# ----------------------------------------------------------------
 # A basic pipeline for digging up pairs exhibiting mean reversion
+# ----------------------------------------------------------------
+# ----------------------------------------------------------------
+
 pairs.pipeline <- function(strategy){
   
   # Constants
@@ -122,7 +210,7 @@ pairs.pipeline <- function(strategy){
   
   # Get symbol pairs and price data from specific strategy
   symbolPairs <- strategy$getSymbolPairs()
-  priceData <- strategy$getStockData()
+  priceData <- strategy$getStockData(symbolPairs)
   
   # Create list of paired price series, for each symbol pair
   pairs <- apply(symbolPairs, 1, function(pair){
@@ -145,24 +233,22 @@ pairs.pipeline <- function(strategy){
     rows(pair$x) == rows(pair$y)
   }, pairs)
   
-  # Collect some analysis on our price series pairs, like
-  # the CADF test (TODO: Add other tests)
-  # TODO: Make this pluggable
+  # Collect the strategy's analysis on our price series pairs
   analyzed <- list.compute(pairs, function(pair){
     c(list("pair" = pair), 
       strategy$analyzePair(pair))
   })
   
-  # Filter out pairs that don't meet some test
-  # result requirements
-  # TODO: Also make this pluggable
-  #candidates <- Filter(strategy$filterAnalyzed, analyzed)
-  candidates <- Filter(function(result){
-    is.null(result$reject)
+  # Filter out pairs that didn't meet some test
+  # result requirements. Notice this is done by returning
+  # a list that has a 'reject' field (with a string value
+  # that tells the reason for rejection)
+  candidates <- Filter(function(candidate){
+    is.null(candidate$reject)
   }, analyzed)
   
   # -------------------------------------------------------------
-  # Did our filter return nothing? If so, stop.
+  # Was everything rejected? If so, stop.
   # -------------------------------------------------------------
   if (length(candidates) == 0) {
     stop("No qualified candidates.")
@@ -178,7 +264,7 @@ pairs.pipeline <- function(strategy){
   testResults <- unlist(lapply(candidates, function(result) {
     list("y" = result$pair$symbols[[1]], 
          "x" = result$pair$symbols[[2]], 
-         strategy[['getTestTableValues']](result))
+         strategy$getTestTableValues(result))
   }))
   
   tableCols <- length(candidates[[1]]) + 1
@@ -192,60 +278,13 @@ pairs.pipeline <- function(strategy){
     readline( "Hit enter to continue" )
   }
   
-  
   # -------------------------------------------------------------
   # Create a portfolio for each of these series
   # -------------------------------------------------------------
-  
-  # Using some strategy for defining the portfolio like:
-  #   static hedge ratio
-  #   dynamic hedge ratio 
-  #   kalman filtering
-  #   what else?
-  #
-  # For now, just use a static hedge ratio defined via "tls" method.
-  portfolios <- list.compute(candidates, function(result){
-    
-    # Extract price series
-    pair <- result$pair
-    y <- pair$y
-    x <- pair$x
-    df <- as.xts( data.frame(y, x) )
-    lookback <- result$lookback
-  
-    # collect portfolio data
-    
-    # -------------------------------------
-    # Static hedge ratio using "tls" (warning: data snooping bias here!)
-    # -------------------------------------
-    #hedge.lookback <- 0
-    #b <- hedgeRatio(y, x, method="tls")
-    #weights <- rep.row(c(1, -b), rows(y))
-    #port <- portfolio(df, weights)
-    
-    # -------------------------------------
-    # Dynamic hedge ratio based on arbitrary N
-    # -------------------------------------
-    #hedge.lookback <- 100
-    #B <- hedgeRatios(y, x, lookback=hedge.lookback, method="ols")
-    #weights <- cbind( ones(rows(B)), -B )
-    #port <- portfolio(df, weights)
-    
-    # -------------------------------------
-    # Dynamic hedge ratio based on lookback
-    # -------------------------------------
-     hedge.lookback <- lookback
-     B <- hedgeRatios(y, x, lookback=lookback, method="ols")
-     weights <- cbind( ones(rows(B)), -B )
-     port <- portfolio(df, weights)
-
-    result <- c(result)
-    result$hedge.lookback = hedge.lookback
-    result$weights = weights
-    result$series = na.omit(port)
-    
-    return (result)
+  portfolios <- list.compute(candidates, function(candidate){
+    strategy$createPortfolio(candidate)
   })
+  
   
   # -------------------------------------------------------------
   # Filter out portfolios based on their attributes
@@ -256,7 +295,7 @@ pairs.pipeline <- function(strategy){
     }
   
     securities <- as.xts( data.frame(p$pair$y, p$pair$x) )
-    securities <- chompRows(securities, rows(p$series))
+    securities <- truncateTo(securities, rows(p$series), from.head=T)
     
     falseHedge <- correlatedWithConstituent(
       p$series, securities, threshold = 0.6)
@@ -356,8 +395,8 @@ pairs.pipeline <- function(strategy){
     
     securities <- as.xts( data.frame(p$pair$y, p$pair$x) )
 
-    weights <- chompRows(weights, length(units))
-    securities <- chompRows(securities, length(units))
+    weights <- truncateTo(weights, length(units), from.head=T)
+    securities <- truncateTo(securities, length(units), from.head=T)
     
     returns <- portfolio_ret(units, weights, securities)
     

@@ -55,7 +55,7 @@ ones <- function(count){
   rep(1, count)
 }
 
-truncateRows <- function(series, size, from.head = F) {
+truncateTo <- function(series, size, from.head = F) {
   len <- rows(series)
   if (from.head == T) {
     series[((len-size)+1):len,]
@@ -64,6 +64,6 @@ truncateRows <- function(series, size, from.head = F) {
   }
 }
 
-chompRows <- function(series, size) {
+truncateToFromHead <- function(series, size) {
   truncateRows(series, size, from.head=T)
 }

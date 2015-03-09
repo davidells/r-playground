@@ -11,7 +11,7 @@ df <- as.xts( data.frame(Ad(USO), Ad(GLD)) )
 # As in Chan's example, this is set to 20, having already been determined with
 # the benefit of hindsight
 lookback = 20
-hedgeRatios <- hedgeRatios(df[,1], df[,2], lookback=lookback)
+hedgeRatios <- hedgeRatios(df[,2], df[,1], lookback=lookback)
 
 # Create a portfolio using the securities in our data frame, weighted according
 # to the hedge ratios we just discovered.

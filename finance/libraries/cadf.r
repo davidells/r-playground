@@ -3,15 +3,19 @@
 # them using hedge ratios using the given method (ols or tls)
 cadf <- function (x, y, method="tls", k=1, model=2) {
   
-  hedgeY <- hedgeRatio(x, y, method=method)
+  hedgeX <- hedgeRatio(x, y, method=method)
   
+  # If method is "tls", hedge is symmetric, so return adf
   if (method == "tls") {
-    adf <- adf(x - hedgeY * y, k=k, model=model)
+    adf <- adf(y - hedgeX * x, k=k, model=model)
     
+  # Otherwise, we try both sides, and pick the one with
+  # the best ADF statistic
   } else if (method == "ols") {
-    hedgeX <- hedgeRatio(y, x, method=method)
-    adfX <- adf(x - hedgeY*y, k=k, model=model)
-    adfY <- adf(y - hedgeX*x, k=k, model=model)
+    adfX <- adf(y - hedgeX*x, k=k, model=model)
+    
+    hedgeY <- hedgeRatio(y, x, method=method)
+    adfY <- adf(x - hedgeY*y, k=k, model=model)
     
     if (adfX$statistic < adfY$statistic) {
       adf <- adfX
