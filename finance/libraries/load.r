@@ -1,8 +1,3 @@
 source("utils.r")
 source("hedge-ratio.r")
-source("adf-extended.r")
-source("cadf.r")
-source("halflife.r")
-source("hurst.r")
-source("johansen.r")
 source("portfolio-functions.r")

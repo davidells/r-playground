@@ -5,12 +5,8 @@ library(quantmod)
 library(XML)
 
 # Load local libraries
-source("libraries/load.r", chdir=TRUE)
-
-# Load mean reversion libraries
-source("libraries/mean-revert-strategies.r", chdir=TRUE)
-source("libraries/top100etf-mean-reversion.r", chdir=TRUE)
-
+source("libraries/load.r", chdir=T)
+source("libraries/mean-reversion/load.r", chdir=T)
 
 # ----------------------------------------------------------------
 # ----------------------------------------------------------------
