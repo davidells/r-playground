@@ -1,3 +1,7 @@
+reject <- function(reason) {
+  list("reject" = reason)
+}
+
 top100etf.mean.reversion <- list(
   
   # -------------------------------
@@ -31,17 +35,17 @@ top100etf.mean.reversion <- list(
     symbols <- unique(as.vector(symbolPairs))
     
     # If we have the data cached, use that
-    if (file.exists("/tmp/top99etf")) {
-      load("/tmp/top99etf")
+    if (file.exists("/tmp/top100etf")) {
+      load("/tmp/top100etf")
       
       # Otherwise, go fetch it, and cache it
     } else {
-      top99etf <- new.env()
-      getSymbols(symbols, from="2013-01-01", env = top99etf, auto.assign = T)
-      save(top99etf, file = "/tmp/top99etf")
+      top100etf <- new.env()
+      getSymbols(symbols, from="2013-01-01", env = top100etf, auto.assign = T)
+      save(top100etf, file = "/tmp/top100etf")
     }
     
-    return( top99etf )
+    return( top100etf )
   },
   
   
@@ -54,10 +58,6 @@ top100etf.mean.reversion <- list(
   #   case, use the "halflife" (time to mean reversion) of the portfolio price series.
   # -------------------------------
   "analyzePair" = function(pair) {
-    
-    reject <- function(reason) {
-      list("reject" = reason)
-    }
     
     y <- pair$y
     x <- pair$x
@@ -145,7 +145,7 @@ top100etf.mean.reversion <- list(
     # -------------------------------------
     # Dynamic hedge ratio based on arbitrary N
     # -------------------------------------
-    #hedge.lookback <- 100
+    #hedge.lookback <- 20
     #B <- hedgeRatios(x, y, lookback=hedge.lookback, method="ols")
     #weights <- cbind( ones(rows(B)), -B )
     #port <- portfolio(df, weights)
@@ -159,9 +159,16 @@ top100etf.mean.reversion <- list(
     port <- portfolio(df, weights)
     
     candidate <- c(candidate)
-    candidate$hedge.lookback = hedge.lookback
-    candidate$weights = weights
-    candidate$series = na.omit(port)
+    candidate$hedge.lookback <- hedge.lookback
+    candidate$weights <- weights
+    candidate$series <- na.omit(port)
+    
+    # Filter out portfolios with hedge lookbacks greater than series length
+    if (hedge.lookback > rows(candidate$series)) {
+      return(reject(paste(
+        "Hedge lookback:", hedge.lookback, 
+        " greater than series length:", length(candidate$series))))
+    }
     
     return (candidate)
   },
@@ -176,6 +183,10 @@ top100etf.mean.reversion <- list(
   # --------------------------------------------------
   "filterPortfolio" = function(portfolio){  
     p <- portfolio
+    
+    if (!is.null(p$reject)) {
+      return(FALSE)
+    }
     
     securities <- as.xts( data.frame(p$pair$y, p$pair$x) )
     securities <- truncateTo(securities, rows(p$series), from.head=T)

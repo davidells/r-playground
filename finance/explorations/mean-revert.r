@@ -133,6 +133,7 @@ pairs.pipeline <- function(strategy){
     p$return.total <- sum(returns)
     p$sharpe.annual <- PerformanceAnalytics::SharpeRatio.annualized(returns)
     p$return.annual <- PerformanceAnalytics::Return.annualized(returns)
+    p$num.trades <- length(rle(units)$values) - 1
     
     return (p)
   })
@@ -213,6 +214,7 @@ portfolio.results <- (function(){
     "hedge.lookback" = sapply(portfolios, function(p) p$hedge.lookback),
     "sharpe.annual" = sapply(portfolios, function(p) p$sharpe.annual),
     "return.annual" = sapply(portfolios, function(p) p$return.annual),
+    "num.trades" = sapply(portfolios, function(p) p$num.trades),
     "return.total" = sapply(portfolios, function(p) p$return.total))
 })()
 
